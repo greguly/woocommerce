@@ -260,6 +260,7 @@ class WC_Admin_Settings {
 	            // Standard text inputs and subtypes like 'number'
 	            case 'text':
 	            case 'email':
+	            case 'multiple_emails':
 	            case 'number':
 	            case 'color' :
 	            case 'password' :
