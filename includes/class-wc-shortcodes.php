@@ -28,6 +28,7 @@ class WC_Shortcodes {
 		add_shortcode( 'woocommerce_messages', array( $this, 'messages_shortcode' ) );
 		add_shortcode( 'product_attribute', array( $this, 'product_attribute' ) );
 		add_shortcode( 'related_products', array( $this, 'related_products_shortcode' ) );
+		add_shortcode( 'variation', array( $this, 'variation' ) );
 
 		// Pages
 		add_shortcode( 'woocommerce_cart', array( $this, 'cart' ) );
@@ -986,5 +987,60 @@ class WC_Shortcodes {
 		woocommerce_related_products( $atts );
 
 		return ob_get_clean();
+	}
+	
+	/**
+	 * Display all product variations
+	 *
+	 * @access public
+	 * @param array $parameters
+	 * @return string
+	 */
+	public function variation( $parameters ) {
+
+		if ( ! isset( $parameters[ 'id' ] ) )
+			return '<p>Wrong usage: missing variation id. [variation id=""]</p>';
+
+		$variation = wc_get_product( (int) $parameters[ 'id' ] );
+
+		if ( ! $variation  ) {
+
+			$html = '<p>Invalid id ' . $parameters[ 'id' ] . '!</p>';
+
+		} elseif ( 'variation' != $variation->product_type ) {
+
+			$html = '<p>Invalid id ' . $parameters[ 'id' ] . '! <br />Not an ID of a variation of a variable product.</p>';
+
+		} else {
+
+			$product              = wc_get_product( $variation->id );
+			$attributes           = $product->get_attributes();
+			$available_variations = $product->get_available_variations();
+
+			$html = sprintf( '<p><a href="%s">%s</a>', get_permalink( $product->id ), $product->get_title() );
+
+			foreach( $available_variations as $available_variation ) {
+
+				if ( $available_variation[ 'variation_id' ] == $variation->variation_id ) {
+
+					foreach( $available_variation[ 'attributes' ] as $attribute_key => $attribute_slug ) {
+
+						$key = str_replace( 'attribute_', '', $attribute_key );
+						$terms = wc_get_product_terms( $product->id, $key, array( 'fields' => 'all' ) );
+
+						foreach( $terms as $term ) {
+								if ( $term->slug == $attribute_slug ) {
+									$html .= '<br />' . wc_attribute_label( $key ) . ': ' . $term->name;
+								}
+						}
+					}
+
+					$html .= '</p>' . $available_variation[ 'availability_html' ];
+					break;
+				}
+			}
+		}
+
+		return $html;
 	}
 }
