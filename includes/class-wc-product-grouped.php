@@ -1,185 +1,193 @@
 <?php
-
-if ( ! defined( 'ABSPATH' ) ) exit; // Exit if accessed directly
-
 /**
- * Grouped Product Class
+ * Grouped Product
  *
  * Grouped products cannot be purchased - they are wrappers for other products.
  *
- * @class 		WC_Product_Grouped
- * @version		2.0.0
- * @package		WooCommerce/Classes/Products
- * @category	Class
- * @author 		WooThemes
+ * @package WooCommerce\Classes\Products
+ * @version 3.0.0
+ */
+
+defined( 'ABSPATH' ) || exit;
+
+/**
+ * Product grouped class.
  */
 class WC_Product_Grouped extends WC_Product {
 
-	/** @public array Array of child products/posts/variations. */
-	public $children;
-
-	/** @public string The product's total stock, including that of its children. */
-	public $total_stock;
+	/**
+	 * Stores product data.
+	 *
+	 * @var array
+	 */
+	protected $extra_data = array(
+		'children' => array(),
+	);
 
 	/**
-	 * __construct function.
+	 * Get internal type.
 	 *
-	 * @access public
-	 * @param mixed $product
+	 * @return string
 	 */
-	public function __construct( $product ) {
-		$this->product_type = 'grouped';
-		parent::__construct( $product );
+	public function get_type() {
+		return 'grouped';
 	}
-
-    /**
-     * Get total stock.
-     *
-     * This is the stock of parent and children combined.
-     *
-     * @access public
-     * @return int
-     */
-    public function get_total_stock() {
-
-        if ( empty( $this->total_stock ) ) {
-
-        	$transient_name = 'wc_product_total_stock_' . $this->id;
-
-        	if ( false === ( $this->total_stock = get_transient( $transient_name ) ) ) {
-		        $this->total_stock = $this->stock;
-
-				if ( sizeof( $this->get_children() ) > 0 ) {
-					foreach ($this->get_children() as $child_id) {
-						$stock = get_post_meta( $child_id, '_stock', true );
-
-						if ( $stock != '' ) {
-							$this->total_stock += intval( $stock );
-						}
-					}
-				}
-
-				set_transient( $transient_name, $this->total_stock );
-			}
-		}
-
-		return apply_filters( 'woocommerce_stock_amount', $this->total_stock );
-    }
 
 	/**
-	 * Return the products children posts.
+	 * Get the add to cart button text.
 	 *
-	 * @access public
-	 * @return array
+	 * @return string
 	 */
-	public function get_children() {
-
-		if ( ! is_array( $this->children ) ) {
-
-			$this->children = array();
-
-			$transient_name = 'wc_product_children_ids_' . $this->id;
-
-        	if ( false === ( $this->children = get_transient( $transient_name ) ) ) {
-
-		        $this->children = get_posts( 'post_parent=' . $this->id . '&post_type=product&orderby=menu_order&order=ASC&fields=ids&post_status=any&numberposts=-1' );
-
-				set_transient( $transient_name, $this->children );
-
-			}
-		}
-
-		return (array) $this->children;
+	public function add_to_cart_text() {
+		return apply_filters( 'woocommerce_product_add_to_cart_text', __( 'View products', 'woocommerce' ), $this );
 	}
-
 
 	/**
-	 * get_child function.
+	 * Get the add to cart button text description - used in aria tags.
 	 *
-	 * @access public
-	 * @param mixed $child_id
-	 * @return object WC_Product or WC_Product_variation
+	 * @since 3.3.0
+	 * @return string
 	 */
-	public function get_child( $child_id ) {
-		return get_product( $child_id );
+	public function add_to_cart_description() {
+		/* translators: %s: Product title */
+		return apply_filters( 'woocommerce_product_add_to_cart_description', sprintf( __( 'View products in the &ldquo;%s&rdquo; group', 'woocommerce' ), $this->get_name() ), $this );
 	}
-
-
-	/**
-	 * Returns whether or not the product has any child product.
-	 *
-	 * @access public
-	 * @return bool
-	 */
-	public function has_child() {
-		return sizeof( $this->get_children() ) ? true : false;
-	}
-
 
 	/**
 	 * Returns whether or not the product is on sale.
 	 *
-	 * @access public
+	 * @param  string $context What the value is for. Valid values are view and edit.
 	 * @return bool
 	 */
-	public function is_on_sale() {
-		if ( $this->has_child() ) {
+	public function is_on_sale( $context = 'view' ) {
+		$children = array_filter( array_map( 'wc_get_product', $this->get_children( $context ) ), 'wc_products_array_filter_visible_grouped' );
+		$on_sale  = false;
 
-			foreach ( $this->get_children() as $child_id ) {
-				$sale_price = get_post_meta( $child_id, '_sale_price', true );
-				if ( $sale_price !== "" && $sale_price >= 0 )
-					return true;
+		foreach ( $children as $child ) {
+			if ( $child->is_purchasable() && ! $child->has_child() && $child->is_on_sale() ) {
+				$on_sale = true;
+				break;
 			}
-
-		} else {
-
-			if ( $this->sale_price && $this->sale_price == $this->price )
-				return true;
-
 		}
-		return false;
-	}
 
+		return 'view' === $context ? apply_filters( 'woocommerce_product_is_on_sale', $on_sale, $this ) : $on_sale;
+	}
 
 	/**
 	 * Returns false if the product cannot be bought.
 	 *
-	 * @access public
-	 * @return cool
+	 * @return bool
 	 */
 	public function is_purchasable() {
 		return apply_filters( 'woocommerce_is_purchasable', false, $this );
 	}
 
-
 	/**
 	 * Returns the price in html format.
 	 *
-	 * @access public
-	 * @param string $price (default: '')
+	 * @param string $price (default: '').
 	 * @return string
 	 */
 	public function get_price_html( $price = '' ) {
+		$tax_display_mode = get_option( 'woocommerce_tax_display_shop' );
+		$child_prices     = array();
+		$children         = array_filter( array_map( 'wc_get_product', $this->get_children() ), 'wc_products_array_filter_visible_grouped' );
 
-		$child_prices = array();
-
-		foreach ( $this->get_children() as $child_id )
-			$child_prices[] = get_post_meta( $child_id, '_price', true );
-
-		$child_prices = array_unique( $child_prices );
+		foreach ( $children as $child ) {
+			if ( '' !== $child->get_price() ) {
+				$child_prices[] = 'incl' === $tax_display_mode ? wc_get_price_including_tax( $child ) : wc_get_price_excluding_tax( $child );
+			}
+		}
 
 		if ( ! empty( $child_prices ) ) {
 			$min_price = min( $child_prices );
+			$max_price = max( $child_prices );
 		} else {
 			$min_price = '';
+			$max_price = '';
 		}
 
-		if ( sizeof( $child_prices ) > 1 ) $price .= $this->get_price_html_from_text();
+		if ( '' !== $min_price ) {
+			if ( $min_price !== $max_price ) {
+				$price = wc_format_price_range( $min_price, $max_price );
+			} else {
+				$price = wc_price( $min_price );
+			}
 
-		$price .= woocommerce_price( $min_price );
+			$is_free = 0 === $min_price && 0 === $max_price;
 
-		$price = apply_filters( 'woocommerce_grouped_price_html', $price, $this );
+			if ( $is_free ) {
+				$price = apply_filters( 'woocommerce_grouped_free_price_html', __( 'Free!', 'woocommerce' ), $this );
+			} else {
+				$price = apply_filters( 'woocommerce_grouped_price_html', $price . $this->get_price_suffix(), $this, $child_prices );
+			}
+		} else {
+			$price = apply_filters( 'woocommerce_grouped_empty_price_html', '', $this );
+		}
 
 		return apply_filters( 'woocommerce_get_price_html', $price, $this );
+	}
+
+	/*
+	|--------------------------------------------------------------------------
+	| Getters
+	|--------------------------------------------------------------------------
+	|
+	| Methods for getting data from the product object.
+	*/
+
+	/**
+	 * Return the children of this product.
+	 *
+	 * @param  string $context What the value is for. Valid values are view and edit.
+	 * @return array
+	 */
+	public function get_children( $context = 'view' ) {
+		return $this->get_prop( 'children', $context );
+	}
+
+	/*
+	|--------------------------------------------------------------------------
+	| Setters
+	|--------------------------------------------------------------------------
+	|
+	| Methods for getting data from the product object.
+	*/
+
+	/**
+	 * Return the children of this product.
+	 *
+	 * @param array $children List of product children.
+	 */
+	public function set_children( $children ) {
+		$this->set_prop( 'children', array_filter( wp_parse_id_list( (array) $children ) ) );
+	}
+
+	/*
+	|--------------------------------------------------------------------------
+	| Sync with children.
+	|--------------------------------------------------------------------------
+	*/
+
+	/**
+	 * Sync a grouped product with it's children. These sync functions sync
+	 * upwards (from child to parent) when the variation is saved.
+	 *
+	 * @param WC_Product|int $product Product object or ID for which you wish to sync.
+	 * @param bool           $save If true, the product object will be saved to the DB before returning it.
+	 * @return WC_Product Synced product object.
+	 */
+	public static function sync( $product, $save = true ) {
+		if ( ! is_a( $product, 'WC_Product' ) ) {
+			$product = wc_get_product( $product );
+		}
+		if ( is_a( $product, 'WC_Product_Grouped' ) ) {
+			$data_store = WC_Data_Store::load( 'product-' . $product->get_type() );
+			$data_store->sync_price( $product );
+			if ( $save ) {
+				$product->save();
+			}
+		}
+		return $product;
 	}
 }
